@@ -1,0 +1,106 @@
+name: 查看最新版本 md5 檔案
+
+on:
+  schedule:
+    # GitHub Actions 使用 UTC
+    # 台灣時間 00:00 = UTC 16:00
+    - cron: "0 16 * * *"
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check-md5:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Get application filename
+        id: app
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CONFIG_URL="https://seerdf.61.com.tw/Assets/App/appconfig.json"
+          DOWNLOAD_BASE_URL="https://seerdf.61.com.tw/Assets/App"
+
+          curl -fsSL "$CONFIG_URL" -o appconfig.json
+
+          FILENAME=$(jq -r '.filename' appconfig.json)
+
+          if [[ -z "$FILENAME" || "$FILENAME" == "null" ]]; then
+            echo "找不到 filename"
+            exit 1
+          fi
+
+          DOWNLOAD_URL="${DOWNLOAD_BASE_URL}/${FILENAME}"
+
+          echo "filename=$FILENAME" >> "$GITHUB_OUTPUT"
+          echo "download_url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
+
+          echo "File: $FILENAME"
+          echo "URL: $DOWNLOAD_URL"
+
+      - name: Download application
+        run: |
+          set -euo pipefail
+
+          curl -fL \
+            --retry 3 \
+            --retry-delay 5 \
+            "${{ steps.app.outputs.download_url }}" \
+            -o application.zip
+
+      - name: Extract seer.exe
+        run: |
+          set -euo pipefail
+
+          rm -rf extracted
+          mkdir -p extracted
+
+          unzip -j application.zip "*/seer.exe" -d extracted
+
+          if [[ ! -f "extracted/seer.exe" ]]; then
+            echo "ZIP 裡找不到 seer.exe"
+            exit 1
+          fi
+
+      - name: Calculate MD5
+        id: md5
+        run: |
+          set -euo pipefail
+
+          MD5=$(md5sum extracted/seer.exe | awk '{print $1}')
+
+          echo "seer.exe MD5: $MD5"
+          echo "md5=$MD5" >> "$GITHUB_OUTPUT"
+
+      - name: Update current_version_md5
+        run: |
+          set -euo pipefail
+
+          echo "${{ steps.md5.outputs.md5 }}" > current_version_md5
+
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add current_version_md5
+
+          if git diff --cached --quiet; then
+            echo "MD5 沒有變化，不需要提交"
+            exit 0
+          fi
+
+          git commit -m "Update current_version_md5"
+          git push
