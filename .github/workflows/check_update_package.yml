@@ -1,11 +1,12 @@
-name: 查看最新版本 md5 檔案
+name: 查看最新版本的 md5
 
 on:
   schedule:
-    # GitHub Actions 使用 UTC
-    # 台灣時間 00:00 = UTC 16:00
+    # 台灣時間每天 00:00
+    # GitHub Actions 使用 UTC，所以是 16:00 UTC
     - cron: "0 16 * * *"
 
+  # 可以在 GitHub Actions 頁面手動執行
   workflow_dispatch:
 
 permissions:
@@ -16,12 +17,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. 下載 Repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+      # 2. 安裝 jq
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq unzip
 
+      # 3. 讀取 appconfig.json，取得 ZIP 檔名
       - name: Get application filename
         id: app
         shell: bash
@@ -29,66 +35,108 @@ jobs:
           set -euo pipefail
 
           CONFIG_URL="https://seerdf.61.com.tw/Assets/App/appconfig.json"
-          DOWNLOAD_BASE_URL="https://seerdf.61.com.tw/Assets/App"
+          DOWNLOAD_BASE_URL="http://seerdf.61.com.tw/Assets/App"
 
+          echo "下載 appconfig.json..."
           curl -fsSL "$CONFIG_URL" -o appconfig.json
 
+          echo "appconfig.json:"
+          cat appconfig.json
+
+          # 從 JSON 取得檔案名稱
           FILENAME=$(jq -r '.filename' appconfig.json)
 
           if [[ -z "$FILENAME" || "$FILENAME" == "null" ]]; then
-            echo "找不到 filename"
+            echo "錯誤：找不到 filename"
             exit 1
           fi
 
           DOWNLOAD_URL="${DOWNLOAD_BASE_URL}/${FILENAME}"
 
+          echo "ZIP 檔案：$FILENAME"
+          echo "下載網址：$DOWNLOAD_URL"
+
           echo "filename=$FILENAME" >> "$GITHUB_OUTPUT"
           echo "download_url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
 
-          echo "File: $FILENAME"
-          echo "URL: $DOWNLOAD_URL"
-
-      - name: Download application
+      # 4. 下載 ZIP
+      - name: Download ZIP
         run: |
           set -euo pipefail
 
-          curl -fL \
+          echo "開始下載：${{ steps.app.outputs.download_url }}"
+
+          curl \
+            -fL \
             --retry 3 \
             --retry-delay 5 \
             "${{ steps.app.outputs.download_url }}" \
             -o application.zip
 
-      - name: Extract seer.exe
+          echo "ZIP 檔案大小："
+          ls -lh application.zip
+
+      # 5. 解壓縮 ZIP
+      - name: Extract ZIP
         run: |
           set -euo pipefail
 
           rm -rf extracted
           mkdir -p extracted
 
-          unzip -j application.zip "*/seer.exe" -d extracted
+          echo "開始解壓縮..."
 
-          if [[ ! -f "extracted/seer.exe" ]]; then
-            echo "ZIP 裡找不到 seer.exe"
-            exit 1
-          fi
+          unzip -q application.zip -d extracted
 
-      - name: Calculate MD5
-        id: md5
+          echo "解壓縮完成，內容如下："
+          find extracted -type f
+
+      # 6. 找出 seer.exe
+      - name: Find seer.exe
+        id: exe
+        shell: bash
         run: |
           set -euo pipefail
 
-          MD5=$(md5sum extracted/seer.exe | awk '{print $1}')
+          SEER_EXE=$(find extracted -type f -iname "seer.exe" | head -n 1)
 
-          echo "seer.exe MD5: $MD5"
+          if [[ -z "$SEER_EXE" ]]; then
+            echo "錯誤：解壓縮後找不到 seer.exe"
+            exit 1
+          fi
+
+          echo "找到：$SEER_EXE"
+
+          echo "path=$SEER_EXE" >> "$GITHUB_OUTPUT"
+
+      # 7. 計算 seer.exe MD5
+      - name: Calculate seer.exe MD5
+        id: md5
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SEER_EXE="${{ steps.exe.outputs.path }}"
+
+          MD5=$(md5sum "$SEER_EXE" | awk '{print $1}')
+
+          echo "seer.exe MD5：$MD5"
+
           echo "md5=$MD5" >> "$GITHUB_OUTPUT"
 
+      # 8. 更新 current_version_md5
       - name: Update current_version_md5
         run: |
           set -euo pipefail
 
           echo "${{ steps.md5.outputs.md5 }}" > current_version_md5
 
+          echo "current_version_md5："
+          cat current_version_md5
+
+      # 9. 如果 MD5 有變化，就 Commit
       - name: Commit and push
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -98,9 +146,13 @@ jobs:
           git add current_version_md5
 
           if git diff --cached --quiet; then
-            echo "MD5 沒有變化，不需要提交"
+            echo "MD5 沒有變化，不需要 Commit"
             exit 0
           fi
 
-          git commit -m "Update current_version_md5"
+          echo "偵測到 MD5 變化！"
+
+          git commit \
+            -m "Update current_version_md5"
+
           git push
