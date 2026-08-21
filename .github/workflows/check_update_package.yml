@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
 
           CONFIG_URL="https://seerdf.61.com.tw/Assets/App/appconfig.json"
-          DOWNLOAD_BASE_URL="http://seerdf.61.com.tw/Assets/App"
+          DOWNLOAD_BASE_URL="https://seerdf.61.com.tw/Assets/App"
 
           echo "下載 appconfig.json..."
           curl -fsSL "$CONFIG_URL" -o appconfig.json
