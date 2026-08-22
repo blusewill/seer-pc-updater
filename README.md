@@ -13,10 +13,10 @@
 
 ![](img/updater-path.png)
 
-**如果是透過啟動器安裝賽爾號，請放在 (起動器安裝路徑)\Games\NewSeer\**
+**如果是透過啟動器安裝賽爾號，請放在 (起動器安裝路徑)\\Games\\NewSeer\\**
 
 之後將捷徑路徑更改到 updater.exe 即可使用！
 
-**如果是透過起動器安裝，請幫我將下面的開始位置改成 (起動器安裝路徑)\Games\NewSeer\**
+**如果是透過起動器安裝，請幫我將下面的開始位置改成 (起動器安裝路徑)\\Games\\NewSeer\\**
 
 ![](img/updater-path.png)
