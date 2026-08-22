@@ -102,7 +102,7 @@ fn extract_zip(zip_path: &Path, destination: &Path) -> Result<(), Box<dyn std::e
 }
 
 fn start_game(seer_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    println!("啟動 seer.exe...");
+    println!("啟動賽爾號...");
 
     Command::new(seer_path)
         .current_dir(seer_path.parent().unwrap_or_else(|| Path::new(".")))
@@ -124,7 +124,7 @@ fn get_temp_zip_path(filename: &str) -> PathBuf {
 
 fn main() {
     println!("================================");
-    println!("       Seer 更新器");
+    println!("       賽爾號更新器");
     println!("================================\n");
 
     // --------------------------------------------------
@@ -217,7 +217,7 @@ fn main() {
         println!("直接啟動遊戲。\n");
 
         if let Err(err) = start_game(&seer_path) {
-            eprintln!("啟動 seer.exe 失敗：{}", err);
+            eprintln!("賽爾號啟動失敗：{}", err);
         }
 
         return;
@@ -351,7 +351,7 @@ fn main() {
     // --------------------------------------------------
 
     if let Err(err) = start_game(&seer_path) {
-        eprintln!("啟動 seer.exe 失敗：{}", err);
+        eprintln!("賽爾號啟動失敗：{}", err);
         return;
     }
 
