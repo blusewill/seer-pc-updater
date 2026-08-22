@@ -19,4 +19,4 @@
 
 **如果是透過起動器安裝，請幫我將下面的開始位置改成 (起動器安裝路徑)\\Games\\NewSeer\\**
 
-![](img/updater-path.png)
+![](img/shortcut-path.png)
