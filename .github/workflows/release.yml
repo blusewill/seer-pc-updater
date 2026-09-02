@@ -54,8 +54,23 @@ jobs:
           Write-Host "Build successful:"
           Get-Item $file | Format-List Name, Length, FullName
 
+      - name: Generate SHA256 checksum
+        shell: pwsh
+        run: |
+          $file = "target\x86_64-pc-windows-msvc\release\updater.exe"
+          $checksumFile = "target\x86_64-pc-windows-msvc\release\updater.exe.sha256"
+
+          $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
+
+          "$hash  updater.exe" | Out-File -FilePath $checksumFile -Encoding ascii
+
+          Write-Host "SHA256:"
+          Write-Host $hash
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: target/x86_64-pc-windows-msvc/release/updater.exe
+          files: |
+            target/x86_64-pc-windows-msvc/release/updater.exe
+            target/x86_64-pc-windows-msvc/release/updater.exe.sha256
           generate_release_notes: true
