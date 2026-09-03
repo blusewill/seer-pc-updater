@@ -1,7 +1,12 @@
 # 賽爾號更新器
 
 一個讓你不用打開賽爾號啟動器又可以檢查賽爾號更新的更新器
+
+還有添加了 Discord 正在遊玩的功能！
+
 ![](img/seer-launcher.png)
+
+![](img/vesktop_NJXGtMBdIG.png)
 
 ## 如何下載？
 

@@ -1,16 +1,20 @@
+use discord_presence::Client as DiscordClient;
+use discord_presence::Event as DiscordEvent;
+use discord_presence::models::rich_presence::ActivityType;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use std::sync::mpsc;
+use std::time::Duration;
 use std::{
     env,
     fs::{self, File},
     io::{self, Read, Write},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Child, Command},
     time::{SystemTime, UNIX_EPOCH},
 };
 use zip::ZipArchive;
-
 // ============================================================
 // 遊戲更新資訊
 // ============================================================
@@ -116,14 +120,6 @@ fn download_file(
 
 // ============================================================
 // 取得遠端 SHA-256
-//
-// GitHub .sha256 常見格式：
-//
-// abcdef1234567890...  updater.exe
-//
-// 也支援只有：
-//
-// abcdef1234567890...
 // ============================================================
 
 fn parse_sha256(text: &str) -> Option<String> {
@@ -364,14 +360,89 @@ fn extract_zip(zip_path: &Path, destination: &Path) -> Result<(), Box<dyn std::e
 // 啟動遊戲
 // ============================================================
 
-fn start_game(seer_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn is_discord_running() -> bool {
+    let output = match Command::new("tasklist").output() {
+        Ok(output) => output,
+        Err(e) => {
+            eprintln!("無法執行 tasklist：{e}");
+            return false;
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    stdout.contains("Discord.exe") || stdout.contains("vesktop.exe")
+}
+
+fn start_game(seer_path: &Path) -> Result<Child, Box<dyn std::error::Error>> {
+    // 先檢查 Discord / Vesktop 是否正在執行
+    if is_discord_running() {
+        println!("偵測到 Discord 或 Vesktop，啟動 Discord RPC...");
+
+        let mut drpc = DiscordClient::new(1544628050359099442);
+
+        let (ready_tx, ready_rx) = mpsc::channel();
+
+        drpc.on_event(DiscordEvent::Ready, move |_ctx| {
+            println!("Discord RPC READY!");
+            let _ = ready_tx.send(());
+        })
+        .persist();
+
+        drpc.on_error(|ctx| {
+            eprintln!("Discord RPC 發生錯誤：{:?}", ctx.event);
+        })
+        .persist();
+
+        drpc.start();
+
+        // 等待 Ready
+        match ready_rx.recv_timeout(Duration::from_secs(10)) {
+            Ok(_) => {
+                println!("Discord RPC 已 Ready");
+
+                // Rich Presence
+                drpc.set_activity(|activity| {
+                    activity
+                        .details("在宇宙大陸探索星系中")
+                        .activity_type(ActivityType::Playing)
+                        .assets(|assets| {
+                            assets
+                                .large_image("discord_icon")
+                                .large_text("賽爾號：巔峰之戰")
+                        })
+                        .append_buttons(|button| {
+                            button
+                                .label("下載遊戲")
+                                .url("https://www.61.com.tw/seer_df/")
+                        })
+                        .append_buttons(|button| {
+                            button
+                                .label("賽爾號更新器")
+                                .url("https://github.com/blusewill/seer-pc-updater")
+                        })
+                })?;
+
+                println!("Discord Rich Presence 已設定");
+            }
+
+            Err(_) => {
+                eprintln!("等待 Discord RPC Ready 超時，繼續啟動遊戲");
+            }
+        }
+    } else {
+        println!("未偵測到 Discord 或 Vesktop，略過 Discord RPC");
+    }
+
     println!("啟動賽爾號...");
 
-    Command::new(seer_path)
+    let child = Command::new(seer_path)
         .current_dir(seer_path.parent().unwrap_or_else(|| Path::new(".")))
         .spawn()?;
 
-    Ok(())
+    println!("賽爾號已啟動，等待 Seer.exe 關閉...");
+
+    Ok(child)
 }
 
 // ============================================================
@@ -423,34 +494,40 @@ fn main() {
     };
 
     // --------------------------------------------------
-    // 第一件事情：檢查 updater.exe 自己
+    // 檢查是否使用 --skip-update
     // --------------------------------------------------
 
-    match check_for_updater_update(&client, &updater_path) {
-        Ok(true) => {
-            // 已經啟動自我更新 BAT
-            // 舊 updater 必須結束
-            println!("Updater 正在更新，結束目前版本。");
-            return;
+    let skip_update = env::args().any(|arg| arg == "--skip-update");
+
+    if skip_update {
+        println!("已使用 --skip-update");
+        println!("跳過 updater.exe 自我更新檢查。\n");
+    } else {
+        // --------------------------------------------------
+        // 第一件事情：檢查 updater.exe 自己
+        // --------------------------------------------------
+
+        match check_for_updater_update(&client, &updater_path) {
+            Ok(true) => {
+                // 已經啟動自我更新 BAT
+                // 舊 updater 必須結束
+                println!("Updater 正在更新，結束目前版本。");
+                return;
+            }
+
+            Ok(false) => {
+                // 已經是最新版
+            }
+
+            Err(err) => {
+                // GitHub 無法連線時，
+                // 不阻止遊戲更新
+                eprintln!("\n檢查更新器版本失敗：{}", err);
+
+                eprintln!("將繼續使用目前版本的更新器。\n");
+            }
         }
-
-        Ok(false) => {
-            // 已經是最新版
-        }
-
-        Err(err) => {
-            // 更新器版本檢查失敗時，
-            // 不直接阻止遊戲更新。
-            //
-            // 這樣即使 GitHub 暫時無法連線，
-            // 使用者仍然可以啟動舊版 updater。
-            eprintln!("\n檢查更新器版本失敗：{}", err);
-
-            eprintln!("將繼續使用目前版本的更新器。\n");
-        }
-    }
-
-    // --------------------------------------------------
+    } // --------------------------------------------------
     // 取得遊戲資料夾
     // --------------------------------------------------
 
@@ -525,8 +602,25 @@ fn main() {
         println!("\n目前已經是最新版本！");
         println!("直接啟動遊戲。\n");
 
-        if let Err(err) = start_game(&seer_path) {
-            eprintln!("賽爾號啟動失敗：{}", err);
+        match start_game(&seer_path) {
+            Ok(mut child) => {
+                println!("等待 Seer.exe 關閉...");
+
+                match child.wait() {
+                    Ok(status) => {
+                        println!("Seer.exe 已關閉，結束更新器。");
+                        println!("遊戲結束狀態：{}", status);
+                    }
+
+                    Err(err) => {
+                        eprintln!("等待 Seer.exe 結束時發生錯誤：{}", err);
+                    }
+                }
+            }
+
+            Err(err) => {
+                eprintln!("賽爾號啟動失敗：{}", err);
+            }
         }
 
         return;
@@ -664,14 +758,36 @@ fn main() {
     }
 
     // --------------------------------------------------
+    // 啟動 Discord RPC
+    // --------------------------------------------------
+
+    // --------------------------------------------------
     // 啟動遊戲
     // --------------------------------------------------
 
-    if let Err(err) = start_game(&seer_path) {
-        eprintln!("賽爾號啟動失敗：{}", err);
+    match start_game(&seer_path) {
+        Ok(mut child) => {
+            println!("遊戲已啟動。");
+            println!("更新器會保持開啟，直到 Seer.exe 關閉...");
 
-        return;
+            match child.wait() {
+                Ok(status) => {
+                    println!("Seer.exe 已關閉。");
+                    println!("遊戲結束狀態：{}", status);
+                }
+
+                Err(err) => {
+                    eprintln!("等待 Seer.exe 結束時發生錯誤：{}", err);
+                }
+            }
+        }
+
+        Err(err) => {
+            eprintln!("賽爾號啟動失敗：{}", err);
+
+            return;
+        }
     }
 
-    println!("遊戲已啟動，更新器結束。");
+    println!("Seer.exe 已結束，更新器現在關閉。");
 }
